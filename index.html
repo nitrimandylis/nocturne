@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nocturne</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23070810'/><rect x='4' y='3' width='3' height='4' fill='%23ffca82'/><rect x='9' y='9' width='3' height='4' fill='%23ffca82'/></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <div id="landing" class="chrome">
+    <h1>Nocturne</h1>
+    <p>Drop an audio file. The building plays it.</p>
+    <div class="landing-buttons">
+      <button id="browse-btn">Browse files</button>
+      <button id="mic-btn">Use microphone</button>
+    </div>
+  </div>
+
+  <div id="drop-hint" hidden>
+    <p>Drop to play</p>
+  </div>
+
+  <div id="player" class="chrome" hidden>
+    <button id="play-btn" title="Play / pause (space)">&#9654;</button>
+    <span id="track-name"></span>
+    <span id="live-dot" hidden>&#9679; live</span>
+    <span id="time-label">0:00 / 0:00</span>
+    <input id="seek" type="range" min="0" max="1000" value="0" step="1">
+    <input id="volume" type="range" min="0" max="100" value="90" step="1" title="Volume">
+    <button id="reseed-btn" title="New building (r)">&#10227;</button>
+    <button id="fullscreen-btn" title="Fullscreen (f)">&#x26F6;</button>
+  </div>
+
+  <input id="file-input" type="file" accept="audio/*" hidden>
+
+  <script src="audio-map.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
