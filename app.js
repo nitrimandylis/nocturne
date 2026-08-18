@@ -1,5 +1,6 @@
-// Nocturne — an apartment building that listens to your music.
-// Every room is drawn in code. No images, no libraries.
+// Nocturne — an apartment building that flashes with your music.
+// Windows twinkle on musical onsets: bass = big bursts, mids = medium,
+// hats = single sparkles. Dark between hits. Everything drawn in code.
 
 // ---------- canvas setup ----------
 
@@ -34,37 +35,34 @@ function pick(rand, list) {
   return list[Math.floor(rand() * list.length)];
 }
 
-// ---------- room generation ----------
+// ---------- rooms ----------
 
-// Warm domestic light colors, with a few rare cool ones.
-const WALL_COLORS = [
-  "#ffd9a0", "#ffd9a0", "#ffca82", "#ffca82", "#ffc06a", "#ffc06a",
-  "#ffe0b8", "#ffb45e", "#ffb45e", "#f5d9b8", "#ffc9b0",
-  "#cfe8c0", "#9fd8d0", "#e8b8c8", // rare cool accents
-];
-const PARTY_COLORS = ["#ff6a50", "#d080ff", "#ffd060", "#60c8b0"];
-
+// Each room: a color temperature on the tungsten ramp, and at most one
+// large silhouette shape. Stable per building seed, so the same apartment
+// flashes the same way every time.
 function makeRoom(rand) {
-  const type = pick(rand, ["lamp", "lamp", "lamp", "lamp", "tv", "shelf", "plant", "bare", rand() < 0.5 ? "party" : "lamp"]);
   return {
-    type,
-    wall: type === "party" ? pick(rand, PARTY_COLORS) : pick(rand, WALL_COLORS),
-    curtain: pick(rand, ["none", "none", "drapes", "blinds", "sheer"]),
-    lampX: 0.15 + rand() * 0.7,     // where the light source sits, 0..1
-    hasPlant: rand() < 0.3,
-    hasCat: rand() < 0.08,
-    hasPerson: rand() < 0.22,
-    personX: 0.2 + rand() * 0.6,
-    personSpeed: 0.1 + rand() * 0.3,
-    flickerPhase: rand() * 100,
+    temp: rand(),
+    silhouette: pick(rand, ["none", "none", "none", "curtain", "plant", "figure"]),
+    silSide: rand() < 0.5 ? 0 : 1, // which side the shape sits on
+    silX: 0.25 + rand() * 0.5,
   };
 }
 
+// tungsten ramp: deep amber (temp 0) to warm white (temp 1)
+function tungsten(temp) {
+  const r = Math.round(255);
+  const g = Math.round(166 + (244 - 166) * temp);
+  const b = Math.round(77 + (228 - 77) * temp);
+  return [r, g, b];
+}
+
+const TV_BLUE = [156, 196, 255];
+
 // ---------- scene layout ----------
 
-let building = null;  // main building geometry + windows
-let bg = null;        // prerendered background canvas
-let rowBands = [];
+let building = null;
+let bg = null;
 
 function buildScene() {
   const rand = mulberry32(seed);
@@ -84,29 +82,21 @@ function buildScene() {
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       windows.push({
-        row: r, col: c,
         x: bx + c * cellW + cellW * 0.18,
         y: by + r * cellH + cellH * 0.16,
         w: cellW * 0.64,
         h: cellH * 0.66,
         room: makeRoom(rand),
-        gain: 0.7 + rand() * 0.6,     // how strongly this room reacts
-        thresh: 0.22 + rand() * 0.45, // how loud it must get before waking
-        brightness: 0,
-        pulse: 0,
-        target: 0,
-        lit: false,
-        ambient: false,
+        flash: null, // {start, dur, strength, blue} while flashing
       });
     }
   }
 
   building = { x: bx, y: by, w: bw, h: bh, cols, rows, cellW, cellH, groundY, windows };
-  rowBands = makeRowBands(rows, 1024);
   drawBackground(rand);
 }
 
-// ---------- background (drawn once per seed/resize) ----------
+// ---------- background: flat poster shapes, drawn once per seed/resize ----------
 
 function drawBackground(rand) {
   bg = document.createElement("canvas");
@@ -118,281 +108,150 @@ function drawBackground(rand) {
 
   const b = building;
 
-  // night sky
+  // sky: one very dark, very subtle vertical ramp
   const sky = g.createLinearGradient(0, 0, 0, H);
-  sky.addColorStop(0, "#04050c");
-  sky.addColorStop(0.55, "#0a0d1c");
-  sky.addColorStop(1, "#141222");
+  sky.addColorStop(0, "#030409");
+  sky.addColorStop(1, "#0b0c16");
   g.fillStyle = sky;
   g.fillRect(0, 0, W, H);
 
-  // stars
-  for (let i = 0; i < 140; i++) {
-    const x = rand() * W;
-    const y = rand() * H * 0.55;
-    g.fillStyle = `rgba(220, 228, 255, ${0.15 + rand() * 0.5})`;
-    g.fillRect(x, y, rand() < 0.12 ? 1.5 : 1, 1);
+  // sparse sharp stars
+  for (let i = 0; i < 90; i++) {
+    g.fillStyle = `rgba(215, 222, 245, ${0.2 + rand() * 0.4})`;
+    g.fillRect(rand() * W, rand() * H * 0.5, 1, 1);
   }
 
-  // moon: hazy disc, no hard crescent
-  const mx = W * 0.82, my = H * 0.14, mr = 18;
-  const halo = g.createRadialGradient(mx, my, mr * 0.3, mx, my, mr * 5);
-  halo.addColorStop(0, "rgba(225, 230, 250, 0.16)");
-  halo.addColorStop(1, "rgba(225, 230, 250, 0)");
-  g.fillStyle = halo;
-  g.fillRect(mx - mr * 5, my - mr * 5, mr * 10, mr * 10);
-  const moon = g.createRadialGradient(mx - mr * 0.3, my - mr * 0.3, 1, mx, my, mr);
-  moon.addColorStop(0, "#f2f4fc");
-  moon.addColorStop(0.8, "#c9d0e8");
-  moon.addColorStop(1, "#9aa2c0");
-  g.fillStyle = moon;
+  // small sharp moon, flat, no halo
+  g.fillStyle = "#dde2f2";
   g.beginPath();
-  g.arc(mx, my, mr, 0, Math.PI * 2);
+  g.arc(W * 0.82, H * 0.13, 11, 0, Math.PI * 2);
   g.fill();
 
-  // distant skyline, two depth layers
-  drawSkyline(g, rand, b.groundY, 0.30, "#0b0e19", 0.55);
-  drawSkyline(g, rand, b.groundY, 0.48, "#101322", 0.75);
+  // hard-edged skyline, two flat depth layers, unlit
+  drawSkyline(g, rand, b.groundY, 0.30, "#080a12");
+  drawSkyline(g, rand, b.groundY, 0.48, "#0d0f1a");
 
-  // main building slab
-  g.fillStyle = "#191510";
-  g.fillRect(b.x - 8, b.y - 6, b.w + 16, b.h + 6);
-  // subtle concrete texture
-  for (let i = 0; i < 900; i++) {
-    const x = b.x - 8 + rand() * (b.w + 16);
-    const y = b.y - 6 + rand() * b.h;
-    g.fillStyle = rand() < 0.5 ? "rgba(0,0,0,0.25)" : "rgba(255,240,220,0.03)";
-    g.fillRect(x, y, 1.5, 1.5);
-  }
-  // faint vertical edges to give the slab form
-  const edge = g.createLinearGradient(b.x - 8, 0, b.x + b.w + 8, 0);
-  edge.addColorStop(0, "rgba(0,0,0,0.5)");
-  edge.addColorStop(0.12, "rgba(0,0,0,0)");
-  edge.addColorStop(0.88, "rgba(0,0,0,0)");
-  edge.addColorStop(1, "rgba(0,0,0,0.5)");
-  g.fillStyle = edge;
+  // main building: flat slab
+  g.fillStyle = "#12100c";
   g.fillRect(b.x - 8, b.y - 6, b.w + 16, b.h + 6);
 
   // roofline: parapet, water tank, antenna mast
-  g.fillStyle = "#0e0c09";
+  g.fillStyle = "#0b0a07";
   g.fillRect(b.x - 12, b.y - 12, b.w + 24, 8);
-  g.fillStyle = "#131009";
-  g.fillRect(b.x + b.w * 0.12, b.y - 34, 34, 24);            // water tank
-  g.fillRect(b.x + b.w * 0.12 + 4, b.y - 40, 26, 6);         // tank lid
-  g.fillRect(b.x + b.w * 0.7, b.y - 52, 3, 42);              // antenna
+  g.fillRect(b.x + b.w * 0.12, b.y - 34, 34, 24);
+  g.fillRect(b.x + b.w * 0.12 + 4, b.y - 40, 26, 6);
+  g.fillRect(b.x + b.w * 0.7, b.y - 52, 3, 42);
 
-  // floor ledges
-  g.fillStyle = "rgba(0,0,0,0.35)";
+  // floor ledges: thin crisp lines
+  g.fillStyle = "rgba(0, 0, 0, 0.4)";
   for (let r = 1; r < b.rows; r++) {
-    g.fillRect(b.x - 8, b.y + r * b.cellH, b.w + 16, 2);
+    g.fillRect(b.x - 8, b.y + r * b.cellH, b.w + 16, 1.5);
   }
 
-  // street glow at the base
-  const street = g.createLinearGradient(0, b.groundY - 40, 0, H);
-  street.addColorStop(0, "rgba(255, 160, 60, 0)");
-  street.addColorStop(1, "rgba(255, 160, 60, 0.10)");
-  g.fillStyle = street;
-  g.fillRect(0, b.groundY - 40, W, H - b.groundY + 40);
-  g.fillStyle = "#050408";
+  // dark window glass: static, windows only ever get brighter than this
+  for (const win of b.windows) {
+    g.fillStyle = "#06070c";
+    g.fillRect(win.x, win.y, win.w, win.h);
+    g.strokeStyle = "#04040a";
+    g.lineWidth = 1.5;
+    g.strokeRect(win.x, win.y, win.w, win.h);
+  }
+
+  // flat ground
+  g.fillStyle = "#040507";
   g.fillRect(0, b.groundY, W, H - b.groundY);
 }
 
-function drawSkyline(g, rand, groundY, heightScale, color, litAlpha) {
+function drawSkyline(g, rand, groundY, heightScale, color) {
+  g.fillStyle = color;
   let x = -20;
   while (x < W + 20) {
     const bw = 30 + rand() * 80;
     const bh = H * heightScale * (0.35 + rand() * 0.65);
-    g.fillStyle = color;
     g.fillRect(x, groundY - bh, bw, bh);
-    // sparse dim windows on distant buildings
-    const n = Math.floor(rand() * 6);
-    for (let i = 0; i < n; i++) {
-      g.fillStyle = `rgba(255, 190, 110, ${0.04 + rand() * 0.08 * litAlpha})`;
-      g.fillRect(x + 4 + rand() * (bw - 10), groundY - bh + 6 + rand() * (bh - 12), 3, 4);
-    }
     x += bw + rand() * 14;
   }
 }
 
-// ---------- window rendering ----------
+// ---------- flash rendering ----------
 
-function drawWindow(win, t) {
-  const { x, y, w, h } = win;
-  const b = Math.min(1, win.brightness + win.pulse);
-
-  // dark glass base: always drawn, gives the grid its faint night sheen
-  ctx.fillStyle = "#070810";
-  ctx.fillRect(x, y, w, h);
-  const sheen = ctx.createLinearGradient(x, y, x + w, y + h);
-  sheen.addColorStop(0, "rgba(120, 150, 200, 0.035)");
-  sheen.addColorStop(0.5, "rgba(120, 150, 200, 0)");
-  sheen.addColorStop(1, "rgba(120, 150, 200, 0.02)");
-  ctx.fillStyle = sheen;
-  ctx.fillRect(x, y, w, h);
-
-  if (b > 0.02) drawRoom(win, b, t);
-
-  // frame and mullions on top of everything inside the glass
-  ctx.strokeStyle = "#060504";
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(x, y, w, h);
-  ctx.fillStyle = "#0a0806";
-  ctx.fillRect(x + w / 2 - 0.75, y, 1.5, h);
-  ctx.fillRect(x, y + h * 0.42, w, 1.5);
-  // sill
-  ctx.fillStyle = "#0d0b08";
-  ctx.fillRect(x - 2, y + h, w + 4, 2.5);
+// instant on, hold, then quick fall
+function flashEnvelope(p) {
+  if (p >= 1) return 0;
+  if (p < 0.5) return 1;
+  const q = (p - 0.5) / 0.5;
+  return 1 - q * q;
 }
 
-function drawRoom(win, b, t) {
+function drawFlash(win, now) {
+  const f = win.flash;
+  const p = (now - f.start) / f.dur;
+  if (p >= 1) { win.flash = null; return; }
+  const bright = flashEnvelope(p) * (0.85 + f.strength * 0.15);
+
   const { x, y, w, h, room } = win;
-  const isTV = room.type === "tv";
-
-  // flicker: TVs stutter, lamps breathe very slightly
-  let flicker = 1;
-  if (isTV) {
-    flicker = 0.75 + 0.25 * Math.abs(Math.sin(t * 13 + room.flickerPhase) * Math.sin(t * 7.3));
-  }
-
-  const alpha = b * flicker;
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x, y, w, h);
-  ctx.clip();
-
-  // room light: radial from the lamp (or screen) position
-  const lx = x + w * (isTV ? 0.5 : room.lampX);
-  const ly = y + h * (isTV ? 0.75 : 0.35);
-  const light = ctx.createRadialGradient(lx, ly, 1, lx, ly, w * 1.4);
-  const wall = isTV ? "#3a4a6a" : room.wall;
-  light.addColorStop(0, tint(wall, 0.55));   // hot core near the lamp
-  light.addColorStop(0.45, wall);
-  light.addColorStop(1, shade(wall, 0.45));
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = light;
+  const [r, g, b] = f.blue ? TV_BLUE : tungsten(room.temp);
+  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${bright})`;
   ctx.fillRect(x, y, w, h);
 
-  // furniture silhouettes
-  ctx.fillStyle = "rgba(20, 12, 6, 0.75)";
-  if (room.type === "shelf") {
-    ctx.fillRect(x + w * 0.08, y + h * 0.25, w * 0.3, h * 0.65);
-    ctx.fillStyle = wall;
-    ctx.globalAlpha = alpha * 0.5;
-    for (let i = 1; i < 4; i++) {
-      ctx.fillRect(x + w * 0.1, y + h * (0.25 + i * 0.16), w * 0.26, 1.5);
-    }
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = "rgba(20, 12, 6, 0.75)";
-  }
-  if (room.type === "lamp") {
-    // floor lamp: stem + shade near the light source
-    const sx = lx, sy = y + h * 0.32;
-    ctx.fillRect(sx - 1, sy + h * 0.1, 2, h * 0.55);
-    ctx.beginPath();
-    ctx.moveTo(sx - w * 0.09, sy + h * 0.12);
-    ctx.lineTo(sx + w * 0.09, sy + h * 0.12);
-    ctx.lineTo(sx + w * 0.06, sy - h * 0.02);
-    ctx.lineTo(sx - w * 0.06, sy - h * 0.02);
-    ctx.fill();
-  }
-  if (isTV) {
-    // glowing screen
-    ctx.fillStyle = `rgba(180, 210, 255, ${alpha * 0.9})`;
-    ctx.fillRect(x + w * 0.3, y + h * 0.55, w * 0.4, h * 0.28);
-    ctx.fillStyle = "rgba(20, 12, 6, 0.75)";
-  }
-  if (room.hasPlant || room.type === "plant") {
-    const px = x + w * 0.82, py = y + h * 0.92;
-    ctx.fillRect(px - w * 0.05, py - h * 0.08, w * 0.1, h * 0.08);
+  // whisper of spill: one tight, faint rim on the facade
+  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${bright * 0.07})`;
+  ctx.fillRect(x - w * 0.18, y - w * 0.18, w * 1.36, h + w * 0.36);
+
+  // at most one large dark shape, subliminal at this speed
+  ctx.fillStyle = `rgba(4, 4, 8, ${bright * 0.9})`;
+  if (room.silhouette === "curtain") {
+    const cw = w * 0.28;
+    ctx.fillRect(room.silSide === 0 ? x : x + w - cw, y, cw, h);
+  } else if (room.silhouette === "plant") {
+    const px = x + (room.silSide === 0 ? w * 0.24 : w * 0.76);
+    ctx.fillRect(px - w * 0.08, y + h * 0.78, w * 0.16, h * 0.22);
     for (let i = 0; i < 4; i++) {
       ctx.beginPath();
-      ctx.ellipse(px + (i - 1.5) * w * 0.035, py - h * 0.14, w * 0.035, h * 0.09, (i - 1.5) * 0.5, 0, Math.PI * 2);
+      ctx.ellipse(px + (i - 1.5) * w * 0.07, y + h * 0.62, w * 0.07, h * 0.2, (i - 1.5) * 0.4, 0, Math.PI * 2);
       ctx.fill();
     }
-  }
-  if (room.hasCat) {
-    // cat on the sill: body blob + ears
-    const cx = x + w * 0.7, cy = y + h * 0.97;
+  } else if (room.silhouette === "figure") {
+    const px = x + w * room.silX;
     ctx.beginPath();
-    ctx.ellipse(cx, cy - h * 0.05, w * 0.09, h * 0.05, 0, 0, Math.PI * 2);
+    ctx.arc(px, y + h * 0.38, w * 0.1, 0, Math.PI * 2);
     ctx.fill();
     ctx.beginPath();
-    ctx.arc(cx + w * 0.07, cy - h * 0.1, w * 0.04, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(cx + w * 0.045, cy - h * 0.12);
-    ctx.lineTo(cx + w * 0.06, cy - h * 0.17);
-    ctx.lineTo(cx + w * 0.08, cy - h * 0.12);
-    ctx.fill();
-  }
-  if (room.hasPerson) {
-    // a silhouette drifting around the room
-    const px = x + w * (room.personX + Math.sin(t * room.personSpeed) * 0.18);
-    ctx.beginPath();
-    ctx.arc(px, y + h * 0.5, w * 0.07, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(px - w * 0.12, y + h);
-    ctx.quadraticCurveTo(px, y + h * 0.5, px + w * 0.12, y + h);
+    ctx.moveTo(px - w * 0.17, y + h);
+    ctx.quadraticCurveTo(px, y + h * 0.42, px + w * 0.17, y + h);
     ctx.fill();
   }
 
-  // curtains
-  if (room.curtain === "drapes") {
-    ctx.fillStyle = "rgba(15, 8, 4, 0.85)";
-    wavyStrip(x, y, w * 0.18, h);
-    wavyStrip(x + w * 0.82, y, w * 0.18, h);
-  } else if (room.curtain === "blinds") {
-    ctx.fillStyle = "rgba(10, 6, 3, 0.7)";
-    for (let yy = y; yy < y + h * 0.55; yy += 4) ctx.fillRect(x, yy, w, 2);
-  } else if (room.curtain === "sheer") {
-    ctx.fillStyle = `rgba(255, 250, 240, ${alpha * 0.25})`;
-    ctx.fillRect(x, y, w, h);
-  }
-
-  ctx.restore();
-
-  // light spill onto the facade around the window
-  const spill = ctx.createRadialGradient(x + w / 2, y + h / 2, w * 0.3, x + w / 2, y + h / 2, w * 1.4);
-  spill.addColorStop(0, hexToRgba(wall, alpha * 0.13));
-  spill.addColorStop(1, hexToRgba(wall, 0));
-  ctx.fillStyle = spill;
-  ctx.fillRect(x - w * 1.2, y - w * 1.2, w * 3.4, h + w * 2.4);
+  // mullions: crisp dark cross over the lit glass
+  ctx.fillStyle = `rgba(4, 4, 8, ${bright})`;
+  ctx.fillRect(x + w / 2 - 0.75, y, 1.5, h);
+  ctx.fillRect(x, y + h * 0.42, w, 1.5);
 }
 
-function wavyStrip(x, y, w, h) {
-  ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.lineTo(x + w, y);
-  for (let yy = y; yy <= y + h; yy += h / 6) {
-    ctx.quadraticCurveTo(x + w * 1.3, yy + h / 12, x + w, yy + h / 6);
+// ---------- spawning ----------
+
+const BURST_COUNTS = {
+  bass: (s) => Math.round(5 + s * 9),
+  mid: (s) => Math.round(2 + s * 4),
+  treble: () => 1,
+};
+const FLASH_DUR = { bass: 380, mid: 300, treble: 240 };
+
+function spawnFlashes(onsets, now) {
+  for (const onset of onsets) {
+    const count = BURST_COUNTS[onset.band](onset.strength);
+    const dark = building.windows.filter((w) => !w.flash);
+    for (let i = 0; i < count && dark.length > 0; i++) {
+      const idx = Math.floor(Math.random() * dark.length);
+      const win = dark.splice(idx, 1)[0];
+      win.flash = {
+        start: now,
+        dur: FLASH_DUR[onset.band] * (0.85 + Math.random() * 0.3),
+        strength: onset.strength,
+        blue: Math.random() < 1 / 30,
+      };
+    }
   }
-  ctx.lineTo(x, y + h);
-  ctx.fill();
-}
-
-// push a hex color toward white by factor (0 = unchanged, 1 = white)
-function tint(hex, f) {
-  const n = parseInt(hex.slice(1), 16);
-  const r = Math.round(((n >> 16) & 255) + (255 - ((n >> 16) & 255)) * f);
-  const g2 = Math.round(((n >> 8) & 255) + (255 - ((n >> 8) & 255)) * f);
-  const b2 = Math.round((n & 255) + (255 - (n & 255)) * f);
-  return `rgb(${r}, ${g2}, ${b2})`;
-}
-
-// darken a hex color by factor (0 = black, 1 = unchanged)
-function shade(hex, f) {
-  const n = parseInt(hex.slice(1), 16);
-  const r = Math.round(((n >> 16) & 255) * f);
-  const g2 = Math.round(((n >> 8) & 255) * f);
-  const b2 = Math.round((n & 255) * f);
-  return `rgb(${r}, ${g2}, ${b2})`;
-}
-
-function hexToRgba(color, a) {
-  if (color.startsWith("rgb")) return color.replace("rgb(", "rgba(").replace(")", `, ${a})`);
-  const n = parseInt(color.slice(1), 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
 }
 
 // ---------- audio ----------
@@ -403,6 +262,7 @@ let freqData = null;
 let audioEl = null;
 let micStream = null;
 let mode = "none"; // none | file | mic
+let detectOnsets = null;
 const simMode = new URLSearchParams(location.search).has("sim");
 
 function ensureAudioCtx() {
@@ -410,8 +270,9 @@ function ensureAudioCtx() {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.75;
+    analyser.smoothingTimeConstant = 0.5; // low smoothing keeps onsets sharp
     freqData = new Uint8Array(analyser.frequencyBinCount);
+    detectOnsets = makeOnsetDetector();
   }
   if (audioCtx.state === "suspended") audioCtx.resume();
 }
@@ -460,68 +321,24 @@ function stopMic() {
   }
 }
 
-// ---------- energy + beat tracking ----------
+// ---------- sim mode: fake 120bpm onsets for previewing without audio ----------
 
-const bassHistory = [];
-let beatCooldown = 0;
+let lastSimT = 0;
 
-function currentRowEnergies(t) {
-  const rows = building.rows;
-  const energies = new Array(rows).fill(0);
-
-  if (simMode) {
-    // fake groove at 120bpm so the scene can be previewed with no audio
-    const beat = Math.pow(Math.max(0, Math.sin(t * Math.PI * 4)), 6);
-    for (let r = 0; r < rows; r++) {
-      const depth = (rows - 1 - r) / rows; // 1 = bottom
-      energies[r] = 0.08 + 0.6 * beat * depth * depth + 0.3 * Math.pow(Math.abs(Math.sin(t * 1.7 + r * 2.4)), 3);
-    }
-    return energies;
+function simOnsets(t) {
+  const onsets = [];
+  // bass on every beat (0.5s), mid on every second offbeat, treble scattered
+  if (Math.floor(t / 0.5) > Math.floor(lastSimT / 0.5)) {
+    onsets.push({ band: "bass", strength: 0.5 + 0.5 * Math.abs(Math.sin(t * 0.7)) });
   }
-
-  if (!analyser || mode === "none" || (mode === "file" && audioEl.paused)) return null;
-
-  analyser.getByteFrequencyData(freqData);
-  for (let r = 0; r < rows; r++) {
-    energies[r] = bandEnergy(freqData, rowBands[r]);
+  if (Math.floor((t + 0.25) / 1.0) > Math.floor((lastSimT + 0.25) / 1.0)) {
+    onsets.push({ band: "mid", strength: 0.6 });
   }
-  return energies;
-}
-
-function detectBeat(energies) {
-  // bass = bottom quarter of rows
-  const rows = building.rows;
-  let bass = 0;
-  const q = Math.max(1, Math.floor(rows / 4));
-  for (let r = rows - q; r < rows; r++) bass += energies[r];
-  bass /= q;
-
-  bassHistory.push(bass);
-  if (bassHistory.length > 43) bassHistory.shift();
-  const avg = bassHistory.reduce((a, v) => a + v, 0) / bassHistory.length;
-
-  if (beatCooldown > 0) beatCooldown--;
-  if (bass > avg * 1.35 && bass > 0.3 && beatCooldown === 0) {
-    beatCooldown = 12;
-    return true;
+  if (Math.random() < 0.08) {
+    onsets.push({ band: "treble", strength: 0.5 });
   }
-  return false;
-}
-
-// ---------- ambient mode (before any audio starts) ----------
-
-let lastAmbientFlip = 0;
-
-function ambientUpdate(t) {
-  const wins = building.windows;
-  if (t - lastAmbientFlip > 2.2) {
-    lastAmbientFlip = t;
-    const w = wins[Math.floor(Math.random() * wins.length)];
-    w.ambient = !w.ambient;
-  }
-  for (const w of wins) {
-    w.target = w.ambient ? 0.8 + 0.08 * Math.sin(t + w.col) : 0;
-  }
+  lastSimT = t;
+  return onsets;
 }
 
 // ---------- main loop ----------
@@ -534,32 +351,17 @@ function frame(now) {
 
   ctx.drawImage(bg, 0, 0, W, H);
 
-  const energies = currentRowEnergies(t);
-  if (energies) {
-    if (detectBeat(energies)) {
-      // a beat makes every lit room throb a little
-      for (const w of b.windows) {
-        if (w.lit) w.pulse = Math.max(w.pulse, 0.18);
-      }
-    }
-    for (const w of b.windows) {
-      const e = energies[w.row] * w.gain;
-      // hysteresis: a room switches ON past its threshold and stays lit
-      // until the energy really dies, so lit windows are always bright
-      if (!w.lit && e > w.thresh) w.lit = true;
-      if (w.lit && e < w.thresh * 0.35) w.lit = false;
-      w.target = w.lit ? Math.min(1, 0.75 + e * 0.4) : 0;
-    }
-  } else {
-    ambientUpdate(t);
+  let onsets = [];
+  if (simMode) {
+    onsets = simOnsets(t);
+  } else if (analyser && (mode === "mic" || (mode === "file" && !audioEl.paused))) {
+    analyser.getByteFrequencyData(freqData);
+    onsets = detectOnsets(freqData);
   }
+  spawnFlashes(onsets, now);
 
   for (const w of b.windows) {
-    // fast attack, slow release: rooms snap on and fade off like real lights
-    const k = w.target > w.brightness ? 0.3 : 0.045;
-    w.brightness += (w.target - w.brightness) * k;
-    w.pulse *= 0.92;
-    drawWindow(w, t);
+    if (w.flash) drawFlash(w, now);
   }
 
   // blinking antenna beacon
