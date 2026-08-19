@@ -171,82 +171,127 @@ function startSim() {
 }
 
 // ---------- terminal rendering ----------
+// Half-block rendering: each terminal cell shows two scene pixels via "\u2580"
+// (upper half block), fg coloring the top pixel and bg the bottom one.
 
 const out = process.stdout;
-const bg = (r: number, g: number, b: number) => `\x1b[48;2;${r};${g};${b}m`;
 
-const SKY_TOP: [number, number, number] = [3, 4, 9];
-const SKY_BOTTOM: [number, number, number] = [11, 12, 22];
-const FACADE: [number, number, number] = [18, 16, 12];
-const GLASS: [number, number, number] = [6, 7, 12];
-const SKYLINE: [number, number, number] = [10, 12, 20];
-const MOON: [number, number, number] = [221, 226, 242];
-const STAR: [number, number, number] = [90, 96, 122];
+type RGB = [number, number, number];
 
-let base: [number, number, number][][] = [];
+const SKY_TOP: RGB = [3, 4, 9];
+const SKY_BOTTOM: RGB = [11, 12, 22];
+const FACADE: RGB = [18, 16, 12];
+const PARAPET: RGB = [11, 10, 7];
+const LEDGE: RGB = [14, 12, 9];
+const GLASS: RGB = [6, 7, 12];
+const SKYLINE: RGB = [17, 19, 30];
+const MOON: RGB = [221, 226, 242];
+const STAR: RGB = [58, 62, 84];
+const STAR_BRIGHT: RGB = [140, 148, 180];
+const STREET: RGB = [24, 18, 10];
+
+function lerp(a: RGB, b: RGB, t: number): RGB {
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * t),
+    Math.round(a[1] + (b[1] - a[1]) * t),
+    Math.round(a[2] + (b[2] - a[2]) * t),
+  ];
+}
+
+let base: RGB[] = [];
 
 function buildBase() {
-  const cols = out.columns, rows = out.rows;
-  base = [];
-  for (let y = 0; y < rows; y++) {
-    const t = y / Math.max(1, rows - 1);
-    const sky: [number, number, number] = [
-      Math.round(SKY_TOP[0] + (SKY_BOTTOM[0] - SKY_TOP[0]) * t),
-      Math.round(SKY_TOP[1] + (SKY_BOTTOM[1] - SKY_TOP[1]) * t),
-      Math.round(SKY_TOP[2] + (SKY_BOTTOM[2] - SKY_TOP[2]) * t),
-    ];
-    base.push(new Array(cols).fill(sky));
-  }
-  const paint = (x: number, y: number, w: number, h: number, c: [number, number, number]) => {
-    for (let yy = y; yy < y + h; yy++) {
-      if (yy < 0 || yy >= rows) continue;
-      for (let xx = x; xx < x + w; xx++) {
-        if (xx >= 0 && xx < cols) base[yy][xx] = c;
+  const { width, height } = scene;
+  base = new Array(width * height);
+  const paint = (x: number, y: number, w: number, h: number, c: RGB) => {
+    for (let yy = Math.max(0, y); yy < Math.min(height, y + h); yy++) {
+      for (let xx = Math.max(0, x); xx < Math.min(width, x + w); xx++) {
+        base[yy * width + xx] = c;
       }
     }
   };
-  for (const s of scene.stars) paint(s.x, s.y, 1, 1, STAR);
+
+  for (let y = 0; y < height; y++) {
+    const sky = lerp(SKY_TOP, SKY_BOTTOM, y / Math.max(1, height - 1));
+    for (let x = 0; x < width; x++) base[y * width + x] = sky;
+  }
+  for (const s of scene.stars) paint(s.x, s.y, 1, 1, s.bright ? STAR_BRIGHT : STAR);
+  if (scene.moon) {
+    const { cx, cy, r } = scene.moon;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx * dx + dy * dy <= r * r + 0.5) paint(cx + dx, cy + dy, 1, 1, MOON);
+      }
+    }
+  }
   for (const r of scene.skyline) paint(r.x, r.y, r.w, r.h, SKYLINE);
-  if (scene.moon) paint(scene.moon.x, scene.moon.y, scene.moon.w, scene.moon.h, MOON);
+
   paint(scene.bx, scene.by, scene.bw, scene.bh, FACADE);
-  for (const w of scene.wins) paint(w.x, w.y, 2, 1, GLASS);
+  paint(scene.bx - 1, scene.by - 1, scene.bw + 2, 1, PARAPET); // parapet lip
+  if (scene.tank) {
+    paint(scene.tank.x, scene.tank.y, scene.tank.w, scene.tank.h, PARAPET);
+    paint(scene.tank.x + 1, scene.tank.y - 1, scene.tank.w - 2, 1, PARAPET); // lid
+  }
+  if (scene.mast) paint(scene.mast.x, scene.mast.y, scene.mast.w, scene.mast.h, PARAPET);
+  for (const y of scene.ledges) paint(scene.bx, y, scene.bw, 1, LEDGE);
+  for (const w of scene.wins) paint(w.x, w.y, 2, 3, GLASS);
+  paint(0, scene.height - 2, width, 2, STREET);
 }
 
 function render() {
-  const cols = out.columns, rows = out.rows;
+  const { width, height } = scene;
   const now = performance.now();
 
-  // overlay = active flashes + beacon, everything else comes from base
-  const overlay = new Map<number, [number, number, number]>();
+  const overlay = new Map<number, RGB>();
   flashes = flashes.filter((f) => now - f.start < f.dur);
   for (const f of flashes) {
     const env = flashEnvelope((now - f.start) / f.dur) * (0.85 + f.strength * 0.15);
     const [r, g, b] = f.blue ? TV_BLUE : tungsten(scene.wins[f.win].temp);
-    const c: [number, number, number] = [Math.round(r * env), Math.round(g * env), Math.round(b * env)];
+    const lit: RGB = [Math.round(r * env), Math.round(g * env), Math.round(b * env)];
     const w = scene.wins[f.win];
-    overlay.set(w.y * cols + w.x, c);
-    overlay.set(w.y * cols + w.x + 1, c);
+    for (let dy = 0; dy < 3; dy++) {
+      overlay.set((w.y + dy) * width + w.x, lit);
+      overlay.set((w.y + dy) * width + w.x + 1, lit);
+    }
+    // whisper of spill: tint the facade ring around the window
+    for (let dy = -1; dy <= 3; dy++) {
+      for (let dx = -1; dx <= 2; dx++) {
+        if (dx >= 0 && dx <= 1 && dy >= 0 && dy <= 2) continue; // the glass itself
+        const px = w.x + dx, py = w.y + dy;
+        const idx = py * width + px;
+        const under = base[idx];
+        if (under !== FACADE && under !== LEDGE) continue;
+        if (!overlay.has(idx)) overlay.set(idx, lerp(under, lit, 0.16 * env));
+      }
+    }
   }
   if (scene.beacon) {
     const on = Math.sin(now / 400) > 0.92;
-    overlay.set(scene.beacon.y * cols + scene.beacon.x, on ? [255, 60, 60] : [40, 14, 14]);
+    overlay.set(scene.beacon.y * width + scene.beacon.x, on ? [255, 60, 60] : [46, 16, 16]);
   }
 
+  const rowsToDraw = Math.floor(height / 2);
   let frame = "\x1b[H";
-  let last = "";
-  for (let y = 0; y < rows - 1; y++) {
-    for (let x = 0; x < cols; x++) {
-      const c = overlay.get(y * cols + x) ?? base[y]?.[x] ?? SKY_TOP;
-      const esc = bg(c[0], c[1], c[2]);
-      if (esc !== last) { frame += esc; last = esc; }
-      frame += " ";
+  let lastFg = "", lastBg = "";
+  for (let row = 0; row < rowsToDraw; row++) {
+    for (let x = 0; x < width; x++) {
+      const ti = (row * 2) * width + x;
+      const bi = (row * 2 + 1) * width + x;
+      const top = overlay.get(ti) ?? base[ti] ?? SKY_TOP;
+      const bottom = overlay.get(bi) ?? base[bi] ?? SKY_TOP;
+      const fg = `\x1b[38;2;${top[0]};${top[1]};${top[2]}m`;
+      const bg = `\x1b[48;2;${bottom[0]};${bottom[1]};${bottom[2]}m`;
+      if (fg !== lastFg) { frame += fg; lastFg = fg; }
+      if (bg !== lastBg) { frame += bg; lastBg = bg; }
+      frame += "\u2580";
     }
-    if (y < rows - 2) { frame += "\x1b[0m\r\n"; last = ""; }
+    frame += "\x1b[0m\r\n";
+    lastFg = ""; lastBg = "";
   }
   // status line
   const source = values.sim ? "sim" : values.app ? `app: ${values.app}` : values.file ? "file" : "system audio";
-  const web = server ? ` · web: http://localhost:${server.port}` : "";
-  frame += `\x1b[0m\r\n\x1b[2m ${source}${web} · q quit · r reseed\x1b[0m\x1b[K`;
+  const web = server ? ` \u00b7 web: http://localhost:${server.port}` : "";
+  frame += `\x1b[0m\x1b[2m ${source}${web} \u00b7 q quit \u00b7 r reseed\x1b[0m\x1b[K`;
   out.write(frame);
 }
 

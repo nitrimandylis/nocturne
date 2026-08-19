@@ -43,34 +43,43 @@ test("no onset before warmup", () => {
 
 // ---------- terminal scene layout ----------
 
-test("layout fits the terminal and is deterministic", () => {
+test("layout fits the pixel canvas and is deterministic", () => {
   const a = layoutScene(120, 40, 42);
   const b = layoutScene(120, 40, 42);
   expect(a).toEqual(b);
+  expect(a.width).toBe(120);
+  expect(a.height).toBe(78); // (rows - 1) * 2
   expect(a.wins.length).toBeGreaterThan(20);
   for (const w of a.wins) {
     expect(w.x).toBeGreaterThanOrEqual(a.bx);
     expect(w.x + 2).toBeLessThanOrEqual(a.bx + a.bw);
     expect(w.y).toBeGreaterThanOrEqual(a.by);
-    expect(w.y).toBeLessThan(a.by + a.bh);
+    expect(w.y + 3).toBeLessThanOrEqual(a.by + a.bh);
   }
 });
 
 test("small terminal still yields a building, no environment", () => {
-  const s = layoutScene(40, 16, 1);
+  const s = layoutScene(40, 14, 1);
   expect(s.wins.length).toBeGreaterThan(0);
   expect(s.moon).toBeNull();
   expect(s.skyline.length).toBe(0);
 });
 
-test("windows never overlap", () => {
+test("windows never overlap and ledges sit between floors", () => {
   const s = layoutScene(200, 50, 7);
   const cells = new Set<string>();
   for (const w of s.wins) {
-    for (const x of [w.x, w.x + 1]) {
-      const key = `${x},${w.y}`;
-      expect(cells.has(key)).toBe(false);
-      cells.add(key);
+    for (let dy = 0; dy < 3; dy++) {
+      for (const x of [w.x, w.x + 1]) {
+        const key = `${x},${w.y + dy}`;
+        expect(cells.has(key)).toBe(false);
+        cells.add(key);
+      }
+    }
+  }
+  for (const y of s.ledges) {
+    for (const w of s.wins) {
+      expect(y === w.y || y === w.y + 1 || y === w.y + 2).toBe(false); // never through glass
     }
   }
 });
