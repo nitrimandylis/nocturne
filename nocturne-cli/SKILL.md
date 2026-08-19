@@ -28,6 +28,14 @@ Safe to run headless: `nocturne --help`. Nothing else.
 - `nocturne --sim` — fake 120bpm groove, no audio needed (demo mode)
 - Keys inside: `q` quit, `r` new building
 
+## Status line metadata
+
+While tapping live audio the status line (and the web mirror's label) shows
+the playing track: Music.app is asked first via osascript (never launched),
+then Cider's local API on port 10767. Cider needs a token in
+`NOCTURNE_CIDER_TOKEN` (or `JUKEBOX_CIDER_TOKEN`); without one the label just
+stays generic — nothing breaks. Do not read or print the token itself.
+
 ## Things that will bite you
 
 - First run needs the macOS System Audio Recording permission; the prompt is

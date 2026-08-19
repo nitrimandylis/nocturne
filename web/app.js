@@ -283,6 +283,10 @@ function trySystemStream() {
   ws.onmessage = (ev) => {
     if (mode !== "system" || !sysDetect) return;
     const msg = JSON.parse(ev.data);
+    if (msg.meta !== undefined) {
+      trackName.textContent = msg.meta || "System audio";
+      return;
+    }
     if (!msg.b) return;
     const raw = atob(msg.b);
     const bytes = new Uint8Array(raw.length);

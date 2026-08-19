@@ -170,6 +170,55 @@ function startSim() {
   }, 16);
 }
 
+// ---------- now-playing metadata ----------
+// Best-effort track label for the status line: Music.app first (osascript,
+// never launches it), then Cider's local API if a token is in the env.
+// Failures just mean no label.
+
+let nowPlaying = "";
+
+async function queryMusicApp(): Promise<string> {
+  const script = `if application "Music" is running then
+  tell application "Music"
+    if player state is playing then return name of current track & " — " & artist of current track
+  end tell
+end if
+return ""`;
+  try {
+    const proc = Bun.spawn(["osascript", "-e", script], { stdout: "pipe", stderr: "ignore" });
+    return (await new Response(proc.stdout).text()).trim();
+  } catch {
+    return "";
+  }
+}
+
+async function queryCider(): Promise<string> {
+  const token = process.env.NOCTURNE_CIDER_TOKEN ?? process.env.JUKEBOX_CIDER_TOKEN;
+  if (!token) return "";
+  const headers = { apptoken: token };
+  try {
+    const playing = await fetch("http://127.0.0.1:10767/api/v1/playback/is-playing",
+      { headers, signal: AbortSignal.timeout(800) });
+    if (!playing.ok || !((await playing.json()) as { is_playing?: boolean }).is_playing) return "";
+    const res = await fetch("http://127.0.0.1:10767/api/v1/playback/now-playing",
+      { headers, signal: AbortSignal.timeout(800) });
+    if (!res.ok) return "";
+    const info = ((await res.json()) as { info?: { name?: string; artistName?: string } }).info;
+    if (!info?.name) return "";
+    return info.artistName ? `${info.name} — ${info.artistName}` : info.name;
+  } catch {
+    return "";
+  }
+}
+
+async function pollNowPlaying() {
+  const next = (await queryMusicApp()) || (await queryCider());
+  if (next !== nowPlaying) {
+    nowPlaying = next;
+    server?.publish("bins", JSON.stringify({ meta: nowPlaying }));
+  }
+}
+
 // ---------- terminal rendering ----------
 // Half-block rendering: each terminal cell shows two scene pixels via "\u2580"
 // (upper half block), fg coloring the top pixel and bg the bottom one.
@@ -290,8 +339,11 @@ function render() {
   }
   // status line
   const source = values.sim ? "sim" : values.app ? `app: ${values.app}` : values.file ? "file" : "system audio";
+  const track = nowPlaying ? ` \u00b7 \u266a ${nowPlaying}` : "";
   const web = server ? ` \u00b7 web: http://localhost:${server.port}` : "";
-  frame += `\x1b[0m\x1b[2m ${source}${web} \u00b7 q quit \u00b7 r reseed\x1b[0m\x1b[K`;
+  let status = ` ${source}${track}${web} \u00b7 q quit \u00b7 r reseed`;
+  if (status.length > width - 1) status = status.slice(0, width - 2) + "\u2026";
+  frame += `\x1b[0m\x1b[2m${status}\x1b[0m\x1b[K`;
   out.write(frame);
 }
 
@@ -347,7 +399,10 @@ function main() {
         return new Response(file.body, { headers: { "content-type": file.type } });
       },
       websocket: {
-        open(ws) { ws.subscribe("bins"); },
+        open(ws) {
+          ws.subscribe("bins");
+          if (nowPlaying) ws.send(JSON.stringify({ meta: nowPlaying }));
+        },
         message() {},
       },
     });
@@ -358,6 +413,10 @@ function main() {
     startSim();
   } else {
     startTap(); // async; feeds flashes as lines arrive
+    if (!values.file) {
+      pollNowPlaying();
+      setInterval(pollNowPlaying, 5000);
+    }
     if (values.file) {
       playerProc = Bun.spawn(["afplay", values.file], { stdout: "ignore", stderr: "ignore" });
       (playerProc.exited as Promise<number>).then(() => {

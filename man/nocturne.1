@@ -35,6 +35,21 @@ Building seed; the same seed gives the same building.
 .TP
 .BR \-h ", " \-\-help
 Show help.
+.SH STATUS LINE
+When tapping live audio, nocturne shows the playing track in the status line
+(and in the web mirror): it asks Music.app via osascript (without launching
+it), then Cider's local API on port 10767 if a token is set. No token, no
+Cider label; the visualizer itself is unaffected.
+.SH ENVIRONMENT
+.TP
+.B NOCTURNE_TAP
+Path to the nocturne-tap helper binary, overriding PATH lookup.
+.TP
+.B NOCTURNE_CIDER_TOKEN
+Cider External Application API token (Cider: Settings > Connectivity) for the
+track label.
+.B JUKEBOX_CIDER_TOKEN
+is honored as a fallback.
 .SH KEYS
 .TP
 .B q
