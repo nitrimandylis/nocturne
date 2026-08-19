@@ -261,9 +261,37 @@ let analyser = null;
 let freqData = null;
 let audioEl = null;
 let micStream = null;
-let mode = "none"; // none | file | mic
+let mode = "none"; // none | file | mic | system
 let detectOnsets = null;
 const simMode = new URLSearchParams(location.search).has("sim");
+
+// system mode: the nocturne CLI serves this page and streams FFT bins over
+// a WebSocket; we run the same onset detector on them, no AudioContext needed
+const pendingOnsets = [];
+
+function trySystemStream() {
+  let ws;
+  try { ws = new WebSocket(`ws://${location.host}/stream`); } catch { return; }
+  let sysDetect = null;
+  ws.onopen = () => {
+    if (mode !== "none") return; // a file or mic is already active, leave it
+    mode = "system";
+    sysDetect = makeOnsetDetector();
+    trackName.textContent = "System audio";
+    showPlayer();
+  };
+  ws.onmessage = (ev) => {
+    if (mode !== "system" || !sysDetect) return;
+    const msg = JSON.parse(ev.data);
+    if (!msg.b) return;
+    const raw = atob(msg.b);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    pendingOnsets.push(...sysDetect(bytes));
+  };
+  // page not served by the CLI: the socket just fails and nothing changes
+  ws.onerror = () => {};
+}
 
 function ensureAudioCtx() {
   if (!audioCtx) {
@@ -354,6 +382,8 @@ function frame(now) {
   let onsets = [];
   if (simMode) {
     onsets = simOnsets(t);
+  } else if (mode === "system") {
+    onsets = pendingOnsets.splice(0, pendingOnsets.length);
   } else if (analyser && (mode === "mic" || (mode === "file" && !audioEl.paused))) {
     analyser.getByteFrequencyData(freqData);
     onsets = detectOnsets(freqData);
@@ -391,11 +421,11 @@ const fileInput = document.getElementById("file-input");
 function showPlayer() {
   landing.hidden = true;
   player.hidden = false;
-  const isMic = mode === "mic";
-  liveDot.hidden = !isMic;
-  timeLabel.hidden = isMic;
-  seekInput.hidden = isMic;
-  playBtn.hidden = isMic;
+  const noTransport = mode === "mic" || mode === "system"; // live sources have no seek/pause
+  liveDot.hidden = !noTransport;
+  timeLabel.hidden = noTransport;
+  seekInput.hidden = noTransport;
+  playBtn.hidden = noTransport;
   updatePlayButton();
   bumpChrome();
 }
@@ -501,4 +531,5 @@ window.addEventListener("mousemove", bumpChrome);
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 if (simMode) { landing.hidden = true; }
+trySystemStream();
 requestAnimationFrame(frame);

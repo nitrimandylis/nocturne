@@ -1,0 +1,96 @@
+import { test, expect } from "bun:test";
+import { makeOnsetDetector, BANDS } from "./web/onsets.js";
+import { layoutScene, tungsten, flashEnvelope } from "./scene";
+
+// ---------- onset detection ----------
+
+function frameWith(band: { lo: number; hi: number }, value: number) {
+  const data = new Uint8Array(1024);
+  for (let i = band.lo; i < band.hi; i++) data[i] = value;
+  return data;
+}
+const silence = new Uint8Array(1024);
+const bass = BANDS[0];
+const treble = BANDS[2];
+
+test("silence never fires", () => {
+  const detect = makeOnsetDetector();
+  for (let i = 0; i < 20; i++) expect(detect(silence).length).toBe(0);
+});
+
+test("bass spike fires one bass onset, cooldown blocks the next", () => {
+  const detect = makeOnsetDetector();
+  for (let i = 0; i < 20; i++) detect(silence);
+  const onsets = detect(frameWith(bass, 220));
+  expect(onsets.length).toBe(1);
+  expect(onsets[0].band).toBe("bass");
+  expect(onsets[0].strength).toBeGreaterThan(0);
+  expect(detect(frameWith(bass, 220)).length).toBe(0);
+});
+
+test("treble spike fires treble, not bass", () => {
+  const detect = makeOnsetDetector();
+  for (let i = 0; i < 10; i++) detect(silence);
+  const onsets = detect(frameWith(treble, 200));
+  expect(onsets.length).toBe(1);
+  expect(onsets[0].band).toBe("treble");
+});
+
+test("no onset before warmup", () => {
+  const detect = makeOnsetDetector();
+  expect(detect(frameWith(bass, 220)).length).toBe(0);
+});
+
+// ---------- terminal scene layout ----------
+
+test("layout fits the terminal and is deterministic", () => {
+  const a = layoutScene(120, 40, 42);
+  const b = layoutScene(120, 40, 42);
+  expect(a).toEqual(b);
+  expect(a.wins.length).toBeGreaterThan(20);
+  for (const w of a.wins) {
+    expect(w.x).toBeGreaterThanOrEqual(a.bx);
+    expect(w.x + 2).toBeLessThanOrEqual(a.bx + a.bw);
+    expect(w.y).toBeGreaterThanOrEqual(a.by);
+    expect(w.y).toBeLessThan(a.by + a.bh);
+  }
+});
+
+test("small terminal still yields a building, no environment", () => {
+  const s = layoutScene(40, 16, 1);
+  expect(s.wins.length).toBeGreaterThan(0);
+  expect(s.moon).toBeNull();
+  expect(s.skyline.length).toBe(0);
+});
+
+test("windows never overlap", () => {
+  const s = layoutScene(200, 50, 7);
+  const cells = new Set<string>();
+  for (const w of s.wins) {
+    for (const x of [w.x, w.x + 1]) {
+      const key = `${x},${w.y}`;
+      expect(cells.has(key)).toBe(false);
+      cells.add(key);
+    }
+  }
+});
+
+// ---------- color and envelope ----------
+
+test("tungsten ramp stays warm and in range", () => {
+  for (const temp of [0, 0.5, 1]) {
+    const [r, g, b] = tungsten(temp);
+    expect(r).toBe(255);
+    expect(g).toBeGreaterThanOrEqual(166);
+    expect(g).toBeLessThanOrEqual(244);
+    expect(b).toBeGreaterThanOrEqual(77);
+    expect(b).toBeLessThanOrEqual(228);
+  }
+});
+
+test("flash envelope: on instantly, gone at the end", () => {
+  expect(flashEnvelope(0)).toBe(1);
+  expect(flashEnvelope(0.4)).toBe(1);
+  expect(flashEnvelope(0.75)).toBeLessThan(1);
+  expect(flashEnvelope(1)).toBe(0);
+});

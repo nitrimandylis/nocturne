@@ -1,0 +1,51 @@
+.TH NOCTURNE 1 "2026-08-19" "nocturne 0.1.0" "User Commands"
+.SH NAME
+nocturne \- an apartment building in your terminal that flashes with your music
+.SH SYNOPSIS
+.B nocturne
+[\fIoptions\fR]
+.SH DESCRIPTION
+Draws a night-time apartment building whose windows flash on musical onsets:
+bass hits light big scattered bursts, mids medium ones, hi-hats single
+sparkles. By default it taps the Mac's system audio through the bundled
+.B nocturne-tap
+helper (Core Audio process taps, macOS 14.4+), so it visualizes whatever is
+playing \- Music.app, Cider, a browser. The first run triggers the System
+Audio Recording permission prompt.
+.SH OPTIONS
+.TP
+.B \-\-app \fIname\fR
+Tap a single app's audio (e.g. \-\-app Music) instead of the system mix.
+.TP
+.B \-\-file \fIpath\fR
+Play an audio file through afplay and visualize it.
+.TP
+.B \-\-web
+Also serve the web version on localhost and open it in the browser,
+live-mirrored to the same audio stream.
+.TP
+.B \-\-port \fIn\fR
+Port for \-\-web (default 4173).
+.TP
+.B \-\-sim
+Fake 120bpm onsets instead of tapping audio. Demo and testing.
+.TP
+.B \-\-seed \fIn\fR
+Building seed; the same seed gives the same building.
+.TP
+.BR \-h ", " \-\-help
+Show help.
+.SH KEYS
+.TP
+.B q
+Quit.
+.TP
+.B r
+New building (reseed).
+.SH FILES
+.TP
+.B nocturne-tap
+Audio tap helper, installed next to nocturne in ~/.bun/bin. Emits FFT frames
+as JSON lines; nocturne finds it via PATH or $NOCTURNE_TAP.
+.SH SEE ALSO
+.BR afplay (1)
