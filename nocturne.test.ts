@@ -1,4 +1,5 @@
 import { test, expect } from "bun:test";
+import { existsSync } from "node:fs";
 import { makeOnsetDetector, BANDS } from "./web/onsets.js";
 import { layoutScene, tungsten, flashEnvelope } from "./scene";
 
@@ -102,4 +103,22 @@ test("flash envelope: on instantly, gone at the end", () => {
   expect(flashEnvelope(0.4)).toBe(1);
   expect(flashEnvelope(0.75)).toBeLessThan(1);
   expect(flashEnvelope(1)).toBe(0);
+});
+
+// ---------- helper lifecycle ----------
+
+// The tap must exit on its own when nobody is reading it. Bun sets SIGPIPE to
+// SIG_IGN and children inherit that, so a helper that does not check its writes
+// survives its parent and holds the audio tap open forever. Needs the compiled
+// helper, so it skips on a fresh clone and in CI.
+const tapBinary = process.env.NOCTURNE_TAP ?? new URL("./helper/nocturne-tap", import.meta.url).pathname;
+
+test.skipIf(!existsSync(tapBinary))("tap exits when its reader goes away", async () => {
+  const tap = Bun.spawn([tapBinary], { stdout: "pipe", stderr: "ignore" });
+  const reader = (tap.stdout as ReadableStream).getReader();
+  await reader.read();   // first line means it started
+  await reader.cancel(); // drop the read end, as a dying parent would
+  const result = await Promise.race([tap.exited, Bun.sleep(5000).then(() => "orphaned")]);
+  if (result === "orphaned") tap.kill();
+  expect(result).not.toBe("orphaned");
 });

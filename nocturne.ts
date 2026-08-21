@@ -384,7 +384,10 @@ function main() {
     if (k === "r") { seed = Math.floor(Math.random() * 1e9); relayout(); }
   });
   process.on("SIGWINCH", relayout);
-  process.on("SIGTERM", () => { cleanup(); process.exit(0); });
+  // SIGHUP is the terminal window closing, SIGINT is Ctrl-C when stdin is not a TTY.
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+    process.on(sig, () => { cleanup(); process.exit(0); });
+  }
 
   if (values.web) {
     server = Bun.serve({

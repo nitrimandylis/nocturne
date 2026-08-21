@@ -204,6 +204,14 @@ let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { _ in
     }
     let b64 = Data(bytes).base64EncodedString()
     print("{\"b\":\"\(b64)\"}")
+
+    // Parent gone: our stdout pipe has no reader, so that write failed with EPIPE.
+    // Normally SIGPIPE would kill us, but Bun sets SIGPIPE to SIG_IGN and children
+    // inherit that, so print() swallows the error and we would spin at 60Hz forever
+    // with the tap open, making the Mac look permanently "playing audio" (which
+    // silently breaks AirPods auto-switching). Checked here because no parent-side
+    // cleanup can cover a parent that was SIGKILLed.
+    if ferror(stdout) != 0 { exit(0) }
 }
 RunLoop.main.add(timer, forMode: .common)
 RunLoop.main.run()
