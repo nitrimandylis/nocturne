@@ -25,7 +25,9 @@ Safe to run headless: `nocturne --help`. Nothing else.
 - `nocturne --app Music` — one app only (exact running-app name, e.g. Music, Cider)
 - `nocturne --file track.mp3` — play a file and visualize it; exits when done
 - `nocturne --web` — same, plus the browser version on localhost:4173, live-mirrored
+  (`--port <n>` changes the port)
 - `nocturne --sim` — fake 120bpm groove, no audio needed (demo mode)
+- `--seed <n>` — fixed building seed, for a reproducible skyline
 - Keys inside: `q` quit, `r` new building
 
 ## Status line metadata
