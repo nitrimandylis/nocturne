@@ -31,7 +31,7 @@ Port for \-\-web (default 4173).
 Fake 120bpm onsets instead of tapping audio. Demo and testing.
 .TP
 .B \-\-seed \fIn\fR
-Building seed; the same seed gives the same building.
+Building seed (default random); the same seed gives the same building.
 .TP
 .BR \-h ", " \-\-help
 Show help.
@@ -61,6 +61,7 @@ New building (reseed).
 .TP
 .B nocturne-tap
 Audio tap helper, installed next to nocturne in ~/.bun/bin. Emits FFT frames
-as JSON lines; nocturne finds it via PATH or $NOCTURNE_TAP.
+as JSON lines; nocturne uses $NOCTURNE_TAP if set, then looks on PATH, then falls back to
+\&./helper/nocturne-tap next to the source.
 .SH SEE ALSO
 .BR afplay (1)

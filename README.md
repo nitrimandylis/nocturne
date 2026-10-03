@@ -25,7 +25,7 @@
 
 A music visualizer shaped like an apartment building at night. Kick drums light up bursts of windows, snares light a few, hi-hats flick single rooms on and off. Between hits the building goes dark, because that is what buildings do at 3am.
 
-It taps macOS system audio directly through Core Audio process taps (macOS 14.4+), so it hears Music.app, Cider, a browser tab, anything. No BlackHole driver, no multi-output device, no routing your audio through a virtual cable like it's 2019. A ~230-line Swift helper does the tap and the FFT; the CLI draws the building with truecolor half-blocks and a fake moon.
+It taps macOS system audio directly through Core Audio process taps (macOS 14.4+), so it hears Music.app, Cider, a browser tab, anything. No BlackHole driver, no multi-output device, no routing your audio through a virtual cable like it's 2019. A ~217-line Swift helper does the tap and the FFT; the CLI draws the building with truecolor half-blocks and a fake moon.
 
 There is also a browser version with the same building in canvas, and `--web` serves it on localhost fed by the same tap, so the terminal and the browser flash in sync. Two buildings, one song.
 
@@ -46,7 +46,7 @@ nick@nocturne:~$ nocturne --app Music
 | 05 | **now-playing label** | asks Music.app (without launching it), then cider's local api, and puts the track in the status line |
 | 06 | **`--app` / `--file`** | narrow the tap to one app, or play a file through afplay and visualize that |
 | 07 | **`--sim`** | fake 120bpm groove when nothing is playing (demos, offices, monasteries) |
-| 08 | **reseed** | `r` draws a new building, `--seed` pins one (the same seed is always the same building) |
+| 08 | **reseed** | `r` draws a new building, `--seed` pins one (the default is random; the same seed is always the same building) |
 
 ## 🚀 Run it
 

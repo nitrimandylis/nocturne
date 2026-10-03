@@ -27,7 +27,7 @@ Safe to run headless: `nocturne --help`. Nothing else.
 - `nocturne --web` — same, plus the browser version on localhost:4173, live-mirrored
   (`--port <n>` changes the port)
 - `nocturne --sim` — fake 120bpm groove, no audio needed (demo mode)
-- `--seed <n>` — fixed building seed, for a reproducible skyline
+- `--seed <n>` — fixed building seed, for a reproducible skyline (default random)
 - Keys inside: `q` quit, `r` new building
 
 ## Status line metadata
